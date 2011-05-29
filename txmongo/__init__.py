@@ -65,7 +65,6 @@ class MongoAPI(object):
         return self[database_name]
 
 
-<<<<<<< HEAD
 class _MongoConnectionManager(object):
     def __init__(self, hosts=['localhost:27017'], pool_size=5):
         if pool_size < 1:
