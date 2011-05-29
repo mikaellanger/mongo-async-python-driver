@@ -113,7 +113,7 @@ class Collection(object):
             proto = _proto
         return proto.OP_QUERY(str(self), spec, skip, limit, fields, slave_okay=slave_okay)
 
-    def find_one(self, spec=None, fields=None, _proto=None):
+    def find_one(self, spec=None, fields=None, slave_okay=False, _proto=None):
         def wrapper(docs):
             doc = docs and docs[0] or {}
             if doc.get("err") is not None:
@@ -124,7 +124,7 @@ class Collection(object):
         if isinstance(spec, ObjectId):
             spec = SON(dict(_id=spec))
 
-        d = self.find(spec, limit=-1, fields=fields, _proto=_proto)
+        d = self.find(spec, limit=-1, fields=fields, slave_okay=slave_okay, _proto=_proto)
         d.addCallback(wrapper)
         return d
 
@@ -150,7 +150,7 @@ class Collection(object):
         d = self._database["$cmd"].find_one(cmd)
         return d
 
-    def count(self, spec=None, fields=None):
+    def count(self, spec=None, fields=None, slave_okay=False):
         def wrapper(result):
             return result["n"]
 
@@ -162,7 +162,7 @@ class Collection(object):
         spec = SON([("count", self._collection_name),
                     ("query", spec or SON()),
                     ("fields", fields)])
-        d = self._database["$cmd"].find_one(spec)
+        d = self._database["$cmd"].find_one(spec, slave_okay=slave_okay)
         d.addCallback(wrapper)
         return d
 
@@ -277,7 +277,7 @@ class Collection(object):
             name=name,
             key=SON(dict(sort_fields["orderby"])),
             unique=unique,
-            dropDups=dropDups,
+            dropDups=dropDups
         ))
 
         d = self._database.system.indexes.insert(index, safe=True)
@@ -328,7 +328,7 @@ class Collection(object):
         d.addCallback(wrapper)
         return d
 
-    def map_reduce(self, map, reduce, full_response=False, **kwargs):
+    def map_reduce(self, map, reduce, full_response=False, slave_okay=False, **kwargs):
         def wrapper(result, full_response):
             if full_response:
                 return result
@@ -337,6 +337,6 @@ class Collection(object):
         cmd = SON([("mapreduce", self._collection_name),
                        ("map", map), ("reduce", reduce)])
         cmd.update(**kwargs)
-        d = self._database["$cmd"].find_one(cmd)
+        d = self._database["$cmd"].find_one(cmd, slave_okay=slave_okay)
         d.addCallback(wrapper, full_response)
         return d
