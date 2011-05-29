@@ -23,9 +23,8 @@ class Database(object):
         self.__factory = factory
         self._database_name = database_name
 
-    @property
-    def _connection(self):
-        return self.__factory.connection()
+    def _connection(self, slave_okay=False):
+        return self.__factory.connection(slave_okay=slave_okay)
 
     def __str__(self):
         return self._database_name

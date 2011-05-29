@@ -70,7 +70,7 @@ class Collection(object):
         d.addCallback(wrapper)
         return d
 
-    def find(self, spec=None, skip=0, limit=0, fields=None, filter=None, _proto=None):
+    def find(self, spec=None, skip=0, limit=0, fields=None, filter=None, slave_okay=False, _proto=None):
         if spec is None:
             spec = SON()
 
@@ -97,10 +97,10 @@ class Collection(object):
         # this is required for the connection pool to work
         # when safe=True
         if _proto is None:
-            proto = self._database._connection
+            proto = self._database._connection(slave_okay=slave_okay)
         else:
             proto = _proto
-        return proto.OP_QUERY(str(self), spec, skip, limit, fields)
+        return proto.OP_QUERY(str(self), spec, skip, limit, fields, slave_okay=slave_okay)
 
     def find_one(self, spec=None, fields=None, _proto=None):
         def wrapper(docs):
@@ -194,7 +194,7 @@ class Collection(object):
                     raise TypeError("insert takes a document or a list of documents")
         else:
             raise TypeError("insert takes a document or a list of documents")
-        proto = self._database._connection
+        proto = self._database._connection()
         proto.OP_INSERT(str(self), docs)
         return self.__safe_operation(proto, safe, ids)
 
@@ -205,7 +205,7 @@ class Collection(object):
             raise TypeError("document must be an instance of dict")
         if not isinstance(upsert, types.BooleanType):
             raise TypeError("upsert must be an instance of bool")
-        proto = self._database._connection
+        proto = self._database._connection()
         proto.OP_UPDATE(str(self), spec, document, upsert, multi)
         return self.__safe_operation(proto, safe)
 
@@ -225,7 +225,7 @@ class Collection(object):
         if not isinstance(spec, types.DictType):
             raise TypeError("spec must be an instance of dict, not %s" % type(spec))
 
-        proto = self._database._connection
+        proto = self._database._connection()
         proto.OP_DELETE(str(self), spec)
         return self.__safe_operation(proto, safe)
 

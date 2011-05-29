@@ -125,14 +125,17 @@ class MongoProtocol(protocol.Protocol):
         message = struct.pack("<iq", limit, cursor_id)
         self.sendMessage(2005, collection, message)
 
-    def OP_QUERY(self, collection, spec, skip, limit, fields=None):
+    def OP_QUERY(self, collection, spec, skip, limit, fields=None, slave_okay=False):
         message = struct.pack("<ii", skip, limit) + bson.BSON.from_dict(spec)
         if fields:
             message += bson.BSON.from_dict(fields)
 
         queryObj = _MongoQuery(self.__id, collection, limit)
         self.__queries[self.__id] = queryObj
-        self.sendMessage(2004, collection, message)
+        opts = _ZERO
+        if slave_okay:
+            opts = struct.pack('<I', 4)
+        self.sendMessage(2004, collection, message, opts)
         return queryObj.deferred
 
     def queryFailure(self, request_id, cursor_id, response, raw_error):
