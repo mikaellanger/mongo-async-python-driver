@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import types
+import warnings
 from txmongo import filter as qf
 from txmongo._pymongo import errors
 from txmongo._pymongo.son import SON
@@ -56,6 +57,16 @@ class Collection(object):
 
     def _gen_index_name(self, keys):
         return u"_".join([u"%s_%s" % item for item in keys])
+
+    @property
+    def name(self):
+        """The name of this collection"""
+        return self._collection_name
+    
+    @property
+    def full_name(self):
+        '''The full name of this Collection (database_name.collection_name).'''
+        return "%s.%s" % (str(self._database), self._collection_name)
 
     def options(self):
         def wrapper(result):
@@ -117,6 +128,28 @@ class Collection(object):
         d.addCallback(wrapper)
         return d
 
+    def runCommand(self, command, value=1, **kwargs):
+        '''
+        @see: http://www.mongodb.org/display/DOCS/Commands
+        @deprecated: use database.command() instead, as in pymongo
+        http://api.mongodb.org/python/1.10.1%2B/api/pymongo/database.html#pymongo.database.Database.command
+        '''
+        warnings.warn("collection.runCommand: use database.command() instead", DeprecationWarning)
+        cmd = SON([ (command, value) ])
+        cmd.update(**kwargs)
+        d = self._database["$cmd"].find_one(cmd)
+        return d
+    
+    def findAndModify(self, query={}, update=None, upsert=False, **kwargs):
+        '''@see: http://api.mongodb.org/python/1.10.1%2B/api/pymongo/collection.html#pymongo.collection.Collection.find_and_modify'''
+        cmd = SON([("findAndModify", self._collection_name),
+                   ("query", query),
+                   ("update", update),
+                   ("upsert", upsert), ])
+        cmd.update(**kwargs)
+        d = self._database["$cmd"].find_one(cmd)
+        return d
+
     def count(self, spec=None, fields=None):
         def wrapper(result):
             return result["n"]
@@ -153,8 +186,7 @@ class Collection(object):
             return result.get('md5')
 
         if not isinstance(spec, ObjectId):
-            raise ValueError(_("filemd5 expected an objectid for its "
-                               "on-keyword argument"))
+            raise ValueError("filemd5 expected an objectid for its on-keyword argument")
 
         spec = SON([("filemd5", spec),
                     ("root", self._collection_name)])

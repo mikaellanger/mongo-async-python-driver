@@ -16,11 +16,7 @@
 from txmongo._pymongo.son import SON
 from txmongo.database import Database
 from txmongo.protocol import MongoProtocol
-from txmongo._pymongo.objectid import ObjectId
-from twisted.internet import task, defer, reactor, protocol
-
-
-DISCONNECT_INTERVAL = .5
+from twisted.internet import defer, reactor, protocol
 
 
 class _offline(object):
@@ -50,11 +46,6 @@ class MongoAPI(object):
         self.__factory = factory
         self._connected = factory.deferred
 
-    def __connection_lost(self, deferred):
-        if self.__factory.size == 0:
-            self.__task.stop()
-            deferred.callback(True)
-
     def disconnect(self):
         return self.__factory.disconnect()
 
@@ -74,6 +65,7 @@ class MongoAPI(object):
         return self[database_name]
 
 
+<<<<<<< HEAD
 class _MongoConnectionManager(object):
     def __init__(self, hosts=['localhost:27017'], pool_size=5):
         if pool_size < 1:
@@ -286,5 +278,4 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
 
 def MongoConnection(hosts=['localhost:27017'], pool_size=1, lazy=False):
     factory = _MongoConnectionManager(hosts, pool_size)
-    factory.continueTrying = reconnect
     return (lazy is True) and factory.API or factory.deferred
