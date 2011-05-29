@@ -152,6 +152,10 @@ class MongoProtocol(protocol.Protocol):
         except KeyError:
             return
         if len(documents) == 1 and u'$err' in documents[0]:
+            if documents[0]['code'] == 13435:
+                self.factory.manager.checkMaster()
+                #This error likely means the master has resigned and a new master has taken it places
+                #start looking for a new master
             queryObj.deferred.errback(ValueError("mongo error=%s" % str(documents[0])))
             del(queryObj)
             return
