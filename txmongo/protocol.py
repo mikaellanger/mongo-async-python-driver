@@ -151,6 +151,10 @@ class MongoProtocol(protocol.Protocol):
             queryObj = self.__queries.pop(request_id)
         except KeyError:
             return
+        if len(documents) == 1 and u'$err' in documents[0]:
+            queryObj.deferred.errback(ValueError("mongo error=%s" % str(documents[0])))
+            del(queryObj)
+            return
         queryObj.documents += documents
         if cursor_id:
             queryObj.id = self.__id
