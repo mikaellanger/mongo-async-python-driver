@@ -48,6 +48,8 @@ class MongoProtocol(protocol.Protocol):
     def connectionLost(self, reason):
         self.connected = 0
         self.factory.remove(self)
+        for queryObj in self.__queries.values():
+            queryObj.deferred.errback(ValueError("Connection Lost"))
         protocol.Protocol.connectionLost(self, reason)
 
     def dataReceived(self, data):
