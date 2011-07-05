@@ -120,7 +120,10 @@ class GridIn(object):
             kwargs["chunkSize"] = kwargs.pop("chunk_size")
 
         # Defaults
-        kwargs["_id"] = kwargs.get("_id", ObjectId())
+        _id = kwargs.get("_id", ObjectId())
+        if not isinstance(_id, ObjectId):
+            _id = ObjectId(_id)
+        kwargs["_id"] = _id
         kwargs["chunkSize"] = kwargs.get("chunkSize", DEFAULT_CHUNK_SIZE)
 
         object.__setattr__(self, "_coll", root_collection)
