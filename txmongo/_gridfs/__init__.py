@@ -103,6 +103,7 @@ class GridFS(object):
             grid_file.close()
         return grid_file._id
 
+    @defer.inlineCallbacks
     def get(self, file_id):
         """Get a file from GridFS by ``"_id"``.
 
@@ -114,7 +115,8 @@ class GridFS(object):
 
         .. versionadded:: 1.6
         """
-        return GridOut(self.__collection, file_id)
+        doc = yield self.__files.find_one({ '_id': file_id })
+        defer.returnValue(GridOut(self.__collection, doc))
 
     def get_last_version(self, filename):
         """Get a file from GridFS by ``"filename"``.
