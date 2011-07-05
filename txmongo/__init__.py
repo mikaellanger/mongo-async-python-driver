@@ -16,7 +16,8 @@
 from txmongo._pymongo.son import SON
 from txmongo.database import Database
 from txmongo.protocol import MongoProtocol
-from twisted.internet import defer, reactor, protocol
+from twisted.internet import defer, reactor, protocol, task
+from twisted.python import log
 
 
 class _offline(object):
@@ -129,10 +130,8 @@ class _MongoConnectionManager(object):
             d.addErrback(self._checkMasterErrback, host, pool)
     
     def _checkMasterCallback(self, isMaster, host):
-        print 'Check Master Result: ', host, isMaster
         if isMaster:
             self.master = host
-            print 'Found Master: ', host
         self._checkCount += 1
         if self._checkCount == len(self.hosts):
             self._checkingMaster = False
@@ -140,7 +139,6 @@ class _MongoConnectionManager(object):
                 reactor.callLater(1, self.checkMaster)
     
     def _checkMasterErrback(self, err, host, pool):
-        print 'Error: ', err
         self._checkCount += 1
         if self._checkCount == len(self.hosts):
             self._checkingMaster = False
@@ -200,9 +198,7 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
     
     @defer.inlineCallbacks
     def append(self, conn):
-        print 'Appending Connection:', self, conn
         if not self._checkedMaster:
-            print 'Checking Master'
             self._checkedMaster = True
             info = yield conn.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
             info = info and info[0] or {}
@@ -218,7 +214,6 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
             self.deferred = None
     
     def checkMaster(self, deferred):
-        print 'Checking Master For: ', self
         c = self.connection()
         d = c.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
         d.addCallback(self._checkMasterCallback, deferred)
@@ -237,7 +232,6 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
         reactor.callLater(1, self.checkMaster, deferred)
     
     def remove(self, conn):
-        print 'Removing Conn: ', self, conn
         try:
             self.pool.remove(conn)
         except:
@@ -269,7 +263,7 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
             self.idx += 1
             self.idx = self.idx % self.size
         except Exception as ex:
-            print ex
+            log.err()
             return _offline()
         else:
             return conn
