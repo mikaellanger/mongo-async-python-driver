@@ -33,6 +33,83 @@ class _MongoQuery(object):
         self.deferred = defer.Deferred()
 
 
+class MongoCursor(object):
+    def __init__(self, collection, limit, protocol):
+        self.cursor_id = None
+        self.request_id = None
+        self.protocol = protocol
+        self.document_count = 0
+        self.limit = limit
+        self.collection = collection
+        self._buffer = []
+        self._position = 0
+        self.deferred = None
+    
+    def __del__(self):
+        if self.cursor_id:
+            self.protocol.OP_KILL_CURSORS([self.cursor_id])
+            self.protocol = None
+    
+    def error(self, error):
+        self.error = error
+        if self.deferred:
+            self.deferred.errback(error)
+    
+    def add_documents(self, documents):
+        self._position = 0
+        self._buffer = documents
+        self.document_count += len(documents)
+        if self.deferred:
+            self.deferred.callback(self._buffer[0])
+            self._position += 1
+    
+    def __load_more(self):
+        self.request_id = self.protocol.__id
+        next_batch = 0
+        if self.limit:
+            next_batch = self.limit - self.document_count
+            # Assert, because according to the protocol spec and my observations
+            # there should be no problems with this, but who knows? At least it will
+            # be noticed, if something unexpected happens. And it is definitely
+            # better, than silently returning a wrong number of documents
+            assert next_batch >= 0, "Unexpected number of documents received!"
+            if not next_batch:
+                self.protocol.OP_KILL_CURSORS([self.cursor_id])
+                return
+        self.protocol.__queries[self.request_id] = self
+        self.OP_GET_MORE(self.collection, next_batch, self.cursor_id)
+    
+    def __iter__(self):
+        return self
+    
+    @defer.inlineCallbacks
+    def as_list(self):
+        result_list = []
+        for r in self:
+            if isinstance(r, defer.Deferred):
+                r = yield r
+            result_list.append(r)
+        defer.returnValue(result_list)
+    
+    def next(self):
+        if self.error:
+            raise self.error
+        if self._position >= len(self._buffer):
+            if self.deferred:
+                return self.deferred
+            else:
+                if self.cursor_id:
+                    self.deferred = defer.Deferred()
+                    self.__load_more()
+                    return self.deferred
+                else:
+                    raise StopIteration()
+        else:
+            r = self._buffer[self._position]
+            self._position += 1
+            return r
+    
+
 class MongoProtocol(protocol.Protocol):
     def __init__(self):
         self.__id = 0
@@ -92,7 +169,6 @@ class MongoProtocol(protocol.Protocol):
         self.querySuccess(request_id, cursor_id, bson._to_dicts(packet[20:]))
 
     def sendMessage(self, operation, collection, message, query_opts=_ZERO):
-        #print "sending %d to %s" % (operation, self)
         fullname = collection and bson._make_c_string(collection) or ""
         message = query_opts + fullname + message
         header = struct.pack("<iiii", 16 + len(message), self.__id, 0, operation)
@@ -131,14 +207,14 @@ class MongoProtocol(protocol.Protocol):
         message = struct.pack("<ii", skip, limit) + bson.BSON.from_dict(spec)
         if fields:
             message += bson.BSON.from_dict(fields)
-
-        queryObj = _MongoQuery(self.__id, collection, limit)
-        self.__queries[self.__id] = queryObj
+        cursor = MongoCursor(collection, limit, self)
+        cursor.request_id = self.__id
+        self.__queries[self.__id] = cursor
         opts = _ZERO
         if slave_okay:
             opts = struct.pack('<I', 4)
         self.sendMessage(2004, collection, message, opts)
-        return queryObj.deferred
+        return cursor
 
     def queryFailure(self, request_id, cursor_id, response, raw_error):
         queryObj = self.__queries.pop(request_id, None)
@@ -147,8 +223,9 @@ class MongoProtocol(protocol.Protocol):
             del(queryObj)
 
     def querySuccess(self, request_id, cursor_id, documents):
+        #print 'Query Success: ', request_id, cursor_id, len(documents)
         try:
-            queryObj = self.__queries.pop(request_id)
+            cursor = self.__queries.pop(request_id)
         except KeyError:
             return
         if len(documents) == 1 and u'$err' in documents[0]:
@@ -156,25 +233,8 @@ class MongoProtocol(protocol.Protocol):
                 self.factory.manager.checkMaster()
                 #This error likely means the master has resigned and a new master has taken it places
                 #start looking for a new master
-            queryObj.deferred.errback(ValueError("mongo error=%s" % str(documents[0])))
-            del(queryObj)
+            cursor.error(ValueError("mongo error=%s") % str(documents[0]))
             return
-        queryObj.documents += documents
-        if cursor_id:
-            queryObj.id = self.__id
-            next_batch = 0
-            if queryObj.limit:
-                next_batch = queryObj.limit - len(queryObj.documents)
-                # Assert, because according to the protocol spec and my observations
-                # there should be no problems with this, but who knows? At least it will
-                # be noticed, if something unexpected happens. And it is definitely
-                # better, than silently returning a wrong number of documents
-                assert next_batch >= 0, "Unexpected number of documents received!"
-                if not next_batch:
-                    self.OP_KILL_CURSORS([cursor_id])
-                    queryObj.deferred.callback(queryObj.documents)
-                    return
-            self.__queries[self.__id] = queryObj
-            self.OP_GET_MORE(queryObj.collection, next_batch, cursor_id)
-        else:
-            queryObj.deferred.callback(queryObj.documents)
+        cursor.add_documents(documents)
+        cursor.cursor_id = cursor_id
+    

@@ -21,13 +21,10 @@ The :mod:`gridfs` package is an implementation of GridFS on top of
 """
 from twisted.python import log
 from twisted.internet import defer
-from txmongo._gridfs.errors import (NoFile,
-                                    UnsupportedAPI)
-from txmongo._gridfs.grid_file import (GridIn,
-                                       GridOut)
+from txmongo._gridfs.errors import NoFile, UnsupportedAPI
+from txmongo._gridfs.grid_file import GridIn, GridOut
 from txmongo import filter
-from txmongo.filter import (ASCENDING,
-                            DESCENDING)
+from txmongo.filter import ASCENDING, DESCENDING
 from txmongo.database import Database
 
 
@@ -56,8 +53,7 @@ class GridFS(object):
         self.__collection = database[collection]
         self.__files = self.__collection.files
         self.__chunks = self.__collection.chunks
-        self.__chunks.create_index(filter.sort(ASCENDING("files_id") + ASCENDING("n")),
-                                   unique=True)
+        self.__chunks.create_index(filter.sort(ASCENDING("files_id") + ASCENDING("n")), unique=True)
 
     def new_file(self, **kwargs):
         """Create a new file in GridFS.
@@ -72,7 +68,8 @@ class GridFS(object):
         .. versionadded:: 1.6
         """
         return GridIn(self.__collection, **kwargs)
-
+    
+    @defer.inlineCallbacks
     def put(self, data, **kwargs):
         """Put data in GridFS as a new file.
 
@@ -100,8 +97,8 @@ class GridFS(object):
         try:
             grid_file.write(data)
         finally:
-            grid_file.close()
-        return grid_file._id
+            yield grid_file.close()
+        defer.returnValue(grid_file._id)
 
     @defer.inlineCallbacks
     def get(self, file_id):
@@ -135,14 +132,12 @@ class GridFS(object):
 
         .. versionadded:: 1.6
         """
-        self.__files.ensure_index(filter.sort(ASCENDING("filename") + \
-                                   DESCENDING("uploadDate")))
+        self.__files.ensure_index(filter.sort(ASCENDING("filename") + DESCENDING("uploadDate")))
 
         d = self.__files.find({"filename": filename},
                                   filter=filter.sort(DESCENDING('uploadDate')))
         d.addCallback(self._cb_get_last_version, filename)
         return d
-#        cursor.limit(-1).sort("uploadDate", -1)#DESCENDING)
 
     def _cb_get_last_version(self, docs, filename):
         try:
