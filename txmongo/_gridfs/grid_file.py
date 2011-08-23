@@ -193,9 +193,7 @@ class GridIn(object):
         """Flush the file to the database.
         """
         yield self.__flush_buffer()
-
         md5 = yield self._coll.filemd5(self._id)
-
         self._file["md5"] = md5
         self._file["length"] = self._position
         self._file["uploadDate"] = datetime.datetime.utcnow()

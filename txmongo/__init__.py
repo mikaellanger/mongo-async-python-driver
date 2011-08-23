@@ -46,25 +46,34 @@ class MongoAPI(object):
     def __init__(self, factory):
         self.__factory = factory
         self._connected = factory.deferred
-
+        self._incoming_transformations = []
+        self._outgoing_transformations = []
+    
     def disconnect(self):
         return self.__factory.disconnect()
-
+    
     def __repr__(self):
         try:
-            cli = self.__factory.pool[0].transport.getPeer()
+            hostinfo = ", ".join([str(p) for p in self.__factory.pools.values()])
+            return '<MongoAPI %s hosts - [%s]>' % (len(self.__factory.hosts), hostinfo)
         except:
-            info = "not connected"
-        else:
-            info = "%s:%s - %d connection(s)" % (cli.host, cli.port, self.__factory.size)
-        return "<Mongodb: %s>" % info
-
+            log.err()
+            return '<MongoAPI>'
+    
+    def register_incoming_transformation(self, transformation):
+        self._incoming_transformations.append(transformation)
+    
+    def register_outgoing_transformation(self, transformation):
+        self._outgoing_transformations.append(transformation)
+    
     def __getitem__(self, database_name):
         return Database(self.__factory, database_name)
-
-    def __getattr__(self, database_name):
-        return self[database_name]
-
+    
+    def __getattr__(self, name):
+        if name[0] == '_':
+            return object.__getattr__(self, name)
+        return self[name]
+    
 
 class _MongoConnectionManager(object):
     def __init__(self, hosts=['localhost:27017'], pool_size=5):
@@ -95,12 +104,15 @@ class _MongoConnectionManager(object):
         for host in self.hosts:
             self.addHost(host)
     
+    @defer.inlineCallbacks
     def disconnect(self):
         defs = []
         for pool in self.pools.values():
             defs.append(pool.disconnectPool())
         self.pools = {}
-        return defer.DeferredList(defs)
+        yield defer.DeferredList(defs)
+        self._checkMaster.stop()
+        defer.returnValue(True)
     
     def connection(self, slave_okay=False):
         if slave_okay:
@@ -157,8 +169,10 @@ class _MongoConnectionManager(object):
         pool.deferred.addCallback(self._addHostComplete, host)
     
     def _addHostComplete(self, pool, host):
+        log.msg('add host complete: %s, %s' % (pool, pool.isMaster))
         if pool.isMaster:
             self.master = host
+            log.msg('Calling Back To: %s' % self.deferred)
             self.deferred.callback(self.API)
     
     def updateHosts(self, hosts):
@@ -189,10 +203,12 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
         self.isMaster = False
         self._checkedMaster = False
         self.disconnecting = False
+        self.ecount = 0
         
         for i in range(self.pool_size):
             reactor.connectTCP(self.host, self.port, self)
-        
+            self.ecount += 1
+    
     def __str__(self):
         return '<_MongoConnectionPool %s:%s (%s connections) - %s>' % (self.host, self.port, self.size, 'master' if self.isMaster else 'secondary')
     
@@ -200,60 +216,66 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
     def append(self, conn):
         if not self._checkedMaster:
             self._checkedMaster = True
-            info = yield conn.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
+            cursor = yield conn.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
+            info = yield cursor.as_list()
             info = info and info[0] or {}
             self.isMaster = info.get('ismaster', False)
         
             if 'hosts' in info:
                 self.manager.updateHosts(info['hosts'])
-            
+        
+        self.ecount -= 1
         self.size += 1
         self.pool.append(conn)
         if self.deferred and self.size == self.pool_size:
+            log.msg('Calling Back')
             self.deferred.callback(self)
             self.deferred = None
+        
+        if self.disconnecting:
+            conn.transport.loseConnection()
     
+    @defer.inlineCallbacks
     def checkMaster(self, deferred):
-        c = self.connection()
-        d = c.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
-        d.addCallback(self._checkMasterCallback, deferred)
-        d.addErrback(self._checkMasterErrback, deferred)        
-    
-    def _checkMasterCallback(self, info, deferred):
-        info = info and info[0] or {}
-        self.isMaster = info.get('ismaster', False)
-        
-        if 'hosts' in info:
-            self.manager.updateHosts(info['hosts'])
-        
-        deferred.callback(self.isMaster)
-    
-    def _checkMasterErrback(self, err, deferred):
-        reactor.callLater(1, self.checkMaster, deferred)
+        try:
+            c = self.connection()
+            if isinstance(c, _offline):  # don't bother trying to check for master if not connected
+                return
+            cursor = yield c.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
+            print cursor
+            results = yield cursor.as_list()
+            info = results and results[0] or {}
+            self.isMaster = info.get('ismaster', False)
+            if 'hosts' in info:
+                self.manager.updateHosts(info['hosts'])
+                
+            deferred.callback(self.isMaster)
+        except:
+            reactor.callLater(1, self.checkMaster, deferred)   
     
     def remove(self, conn):
         try:
             self.pool.remove(conn)
         except:
             pass
-        self.size = len(self.pool)
+        self.size -= 1
         
         if self.isMaster and not self.disconnecting:
             self.manager.master = None
             self.isMaster = False
             self.manager.checkMaster()
         
-        if self.size == 0 and self.disconnecting:
+        if self.disconnecting and self.size == 0 and self.ecount == 0:
             self.disconnecting.callback(True)
-        
+    
     def disconnectPool(self):
         if self.disconnecting is not False:
             return self.disconnecting
-
         self.stopTrying()
         self.disconnecting = defer.Deferred()
         for conn in self.pool:
             conn.transport.loseConnection()
+        
         return self.disconnecting
     
     def connection(self):
@@ -262,7 +284,7 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
             conn = self.pool[self.idx % self.size]
             self.idx += 1
             self.idx = self.idx % self.size
-        except Exception as ex:
+        except:
             log.err()
             return _offline()
         else:
