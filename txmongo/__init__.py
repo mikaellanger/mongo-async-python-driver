@@ -46,7 +46,9 @@ class MongoAPI(object):
     def __init__(self, factory):
         self.__factory = factory
         self._connected = factory.deferred
-
+        self._incoming_transformations = []
+        self._outgoing_transformations = []
+    
     def disconnect(self):
         return self.__factory.disconnect()
 
@@ -59,6 +61,12 @@ class MongoAPI(object):
             info = "%s:%s - %d connection(s)" % (cli.host, cli.port, self.__factory.size)
         return "<Mongodb: %s>" % info
 
+    def register_incoming_transformation(self, transformation):
+        self._incoming_transformations.append(transformation)
+    
+    def register_outgoing_transformation(self, transformation):
+        self._outgoing_transformations.append(transformation)
+    
     def __getitem__(self, database_name):
         return Database(self.__factory, database_name)
 
