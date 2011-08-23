@@ -15,17 +15,18 @@
 
 import txmongo
 from twisted.trial import unittest
-from twisted.internet import base, defer, reactor
+from twisted.internet import base, defer
 
-mongo_host="localhost"
-mongo_port=27017
+mongo_host = "localhost"
+mongo_port = 27017
 base.DelayedCall.debug = False
+
 
 class TestMongoConnectionMethods(unittest.TestCase):
     @defer.inlineCallbacks
     def test_MongoConnection(self):
         # MongoConnection returns deferred, which gets MongoAPI
-        conn = txmongo.MongoConnection(mongo_host, mongo_port)
+        conn = txmongo.MongoConnection(hosts=['%s:%d' % (mongo_host, mongo_port)])
         self.assertEqual(isinstance(conn, defer.Deferred), True)
         rapi = yield conn
         self.assertEqual(isinstance(rapi, txmongo.MongoAPI), True)
@@ -35,7 +36,7 @@ class TestMongoConnectionMethods(unittest.TestCase):
     @defer.inlineCallbacks
     def test_MongoConnectionPool(self):
         # MongoConnectionPool returns deferred, which gets MongoAPI
-        conn = txmongo.MongoConnectionPool(mongo_host, mongo_port, pool_size=2)
+        conn = txmongo.MongoConnection(hosts=['%s:%d' % (mongo_host, mongo_port)], pool_size=2)
         self.assertEqual(isinstance(conn, defer.Deferred), True)
         rapi = yield conn
         self.assertEqual(isinstance(rapi, txmongo.MongoAPI), True)
@@ -45,7 +46,7 @@ class TestMongoConnectionMethods(unittest.TestCase):
     @defer.inlineCallbacks
     def test_lazyMongoConnection(self):
         # lazyMongoConnection returns MongoAPI
-        rapi = txmongo.lazyMongoConnection(mongo_host, mongo_port)
+        rapi = txmongo.MongoConnection(hosts=['%s:%d' % (mongo_host, mongo_port)], lazy=True)
         self.assertEqual(isinstance(rapi, txmongo.MongoAPI), True)
         yield rapi._connected
         disconnected = yield rapi.disconnect()
@@ -54,7 +55,7 @@ class TestMongoConnectionMethods(unittest.TestCase):
     @defer.inlineCallbacks
     def test_lazyMongoConnectionPool(self):
         # lazyMongoConnection returns MongoAPI
-        rapi = txmongo.lazyMongoConnectionPool(mongo_host, mongo_port, pool_size=2)
+        rapi = txmongo.MongoConnection(hosts=['%s:%d' % (mongo_host, mongo_port)], pool_size=2, lazy=True)
         self.assertEqual(isinstance(rapi, txmongo.MongoAPI), True)
         yield rapi._connected
         disconnected = yield rapi.disconnect()

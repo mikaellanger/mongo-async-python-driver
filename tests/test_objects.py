@@ -19,13 +19,13 @@ from txmongo import database
 from txmongo import collection
 from txmongo import gridfs
 from txmongo._pymongo import objectid
-from txmongo._gridfs import GridIn, GridOut
+from txmongo._gridfs import GridIn
 from twisted.trial import unittest
 from twisted.trial import runner
-from twisted.internet import base, defer, reactor
+from twisted.internet import base, defer
 
-mongo_host="localhost"
-mongo_port=27017
+mongo_host = "localhost"
+mongo_port = 27017
 base.DelayedCall.debug = False
 
 
@@ -33,7 +33,7 @@ class TestMongoObjects(unittest.TestCase):
     @defer.inlineCallbacks
     def test_MongoObjects(self):
         """ Tests creating mongo objects """
-        conn = yield txmongo.MongoConnection(mongo_host, mongo_port)
+        conn = yield txmongo.MongoConnection(['%s:%d' % (mongo_host, mongo_port)])
         mydb = conn.mydb
         self.assertEqual(isinstance(mydb, database.Database), True)
         mycol = mydb.mycol
@@ -43,14 +43,14 @@ class TestMongoObjects(unittest.TestCase):
     @defer.inlineCallbacks
     def test_MongoOperations(self):
         """ Tests mongo operations """
-        conn = yield txmongo.MongoConnection(mongo_host, mongo_port)
+        conn = yield txmongo.MongoConnection(['%s:%d' % (mongo_host, mongo_port)])
         test = conn.foo.test
         
         # insert
-        doc = {"foo":"bar", "items":[1, 2, 3]}
+        doc = {"foo": "bar", "items": [1, 2, 3]}
         yield test.insert(doc, safe=True)
         result = yield test.find_one(doc)
-        self.assertEqual(result.has_key("_id"), True)
+        self.assertEqual('_id' in result, True)
         self.assertEqual(result["foo"], "bar")
         self.assertEqual(result["items"], [1, 2, 3])
         
@@ -63,8 +63,8 @@ class TestMongoObjects(unittest.TestCase):
         self.assertEqual(result["items"], [1, 2, 3])
 
         # update
-        yield test.update({"_id":result["_id"]}, {"$set":{"one":"two"}}, safe=True)
-        result = yield test.find_one({"_id":result["_id"]})
+        yield test.update({"_id": result["_id"]}, {"$set": {"one": "two"}}, safe=True)
+        result = yield test.find_one({"_id": result["_id"]})
         self.assertEqual(result["one"], "two")
 
         # delete
@@ -84,26 +84,22 @@ class TestGridFsObjects(unittest.TestCase):
     @defer.inlineCallbacks
     def test_GridFsObjects(self):
         """ Tests gridfs objects """
-        conn = yield txmongo.MongoConnection(mongo_host, mongo_port)
+        conn = yield txmongo.MongoConnection(['%s:%d' % (mongo_host, mongo_port)])
         db = conn.test
         collection = db.fs
+        gfs = gridfs.GridFS(db)  # Default collection
+        gridin = GridIn(collection, filename='test', contentType="text/plain", chunk_size=65536)
+        new_file = gfs.new_file(filename='test2', contentType="text/plain", chunk_size=65536)
         
-        gfs = gridfs.GridFS(db) # Default collection
-        
-        gridin = GridIn(collection, filename='test', contentType="text/plain",
-                        chunk_size=2**2**2**2)
-        new_file = gfs.new_file(filename='test2', contentType="text/plain",
-                        chunk_size=2**2**2**2)
-        
+        yield gfs._GridFS__index_create_deferred  # Wait for index to be created
         # disconnect
         yield conn.disconnect()
-        
+    
     @defer.inlineCallbacks
     def test_GridFsOperations(self):
         """ Tests gridfs operations """
-        conn = yield txmongo.MongoConnection(mongo_host, mongo_port)
+        conn = yield txmongo.MongoConnection(['%s:%d' % (mongo_host, mongo_port)])
         db = conn.test
-        collection = db.fs
         
         # Don't forget to disconnect
         self.addCleanup(self._disconnect, conn)
@@ -115,9 +111,9 @@ class TestGridFsObjects(unittest.TestCase):
         
         try:
             # Tests writing to a new gridfs file
-            gfs = gridfs.GridFS(db) # Default collection
-            g_in = gfs.new_file(filename='optest', contentType="text/plain",
-                            chunk_size=2**2**2**2) # non-default chunk size used
+            gfs = gridfs.GridFS(db)  # Default collection
+            g_in = gfs.new_file(filename='optest', contentType="text/plain", chunk_size=65536) 
+            # non-default chunk size used
             # yielding to ensure writes complete before we close and close before we try to read
             yield g_in.write(in_file.read())
             yield g_in.close()
@@ -127,7 +123,8 @@ class TestGridFsObjects(unittest.TestCase):
             data = yield g_out.read()
             out_file.write(data)
             _id = g_out._id
-        except Exception,e:
+        except Exception as e:
+            print "Error:", e
             self.fail("Failed to communicate with the GridFS. " +
                       "Is MongoDB running? %s" % e)
         else:
@@ -137,7 +134,6 @@ class TestGridFsObjects(unittest.TestCase):
             in_file.close()
             out_file.close()
             g_out.close()
-
         
         listed_files = yield gfs.list()
         self.assertEqual(['optest'], listed_files,
