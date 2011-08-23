@@ -239,7 +239,6 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
             if isinstance(c, _offline):  # don't bother trying to check for master if not connected
                 return
             cursor = yield c.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
-            print cursor
             results = yield cursor.as_list()
             info = results and results[0] or {}
             self.isMaster = info.get('ismaster', False)
