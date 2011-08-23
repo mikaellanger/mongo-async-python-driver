@@ -169,10 +169,8 @@ class _MongoConnectionManager(object):
         pool.deferred.addCallback(self._addHostComplete, host)
     
     def _addHostComplete(self, pool, host):
-        log.msg('add host complete: %s, %s' % (pool, pool.isMaster))
         if pool.isMaster:
             self.master = host
-            log.msg('Calling Back To: %s' % self.deferred)
             self.deferred.callback(self.API)
     
     def updateHosts(self, hosts):
@@ -228,7 +226,6 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
         self.size += 1
         self.pool.append(conn)
         if self.deferred and self.size == self.pool_size:
-            log.msg('Calling Back')
             self.deferred.callback(self)
             self.deferred = None
         
