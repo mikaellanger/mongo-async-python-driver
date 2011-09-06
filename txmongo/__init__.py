@@ -16,6 +16,7 @@
 from txmongo._pymongo.son import SON
 from txmongo.database import Database
 from txmongo.protocol import MongoProtocol
+from txmongo._pymongo.objectid import ObjectId
 from twisted.internet import defer, reactor, protocol, task
 from twisted.internet.error import TimeoutError
 from twisted.python import log
