@@ -17,7 +17,49 @@ from txmongo._pymongo.son import SON
 from txmongo.database import Database
 from txmongo.protocol import MongoProtocol
 from twisted.internet import defer, reactor, protocol, task
+from twisted.internet.error import TimeoutError
 from twisted.python import log
+
+
+def timeout(secs, clock=reactor):
+    """Decorator that adds timeout to method and functions
+    that return a deferred.
+
+        >>> @timeout(5)
+        >>> def this_funciton_returns_a_deferred():
+        ...     return defer.succeed(None)
+        >>>
+
+    """
+    def wrap(func):
+        @defer.inlineCallbacks
+        def _timeout(*args, **kwargs):
+            raw_deferred = func(*args, **kwargs)
+            if not isinstance(raw_deferred, defer.Deferred):
+                defer.returnValue(raw_deferred)
+
+            timeout_deferred = defer.Deferred()
+            timeout_callid = clock.callLater(
+                secs, timeout_deferred.callback, None)
+
+            try:
+                raw_result, timeout_result = yield defer.DeferredList(
+                    [raw_deferred, timeout_deferred], fireOnOneCallback=True,
+                    fireOnOneErrback=True, consumeErrors=True)
+            except defer.FirstError, e:
+                assert e.index == 0
+                timeout_callid.cancel()
+                e.subFailure.raiseException()
+            else:
+                if timeout_deferred.called:
+                    raw_deferred.cancel()
+                    raise TimeoutError("%s secs have expired" % secs)
+
+            timeout_callid.cancel()
+            defer.returnValue(raw_result)
+        return _timeout
+
+    return wrap
 
 
 class _offline(object):
@@ -99,7 +141,7 @@ class _MongoConnectionManager(object):
     
     def __repr__(self):
         return self.__str__()
-    
+
     def reconnect(self):
         for host in self.hosts:
             self.addHost(host)
@@ -128,13 +170,13 @@ class _MongoConnectionManager(object):
             return pool.connection()
         else:
             return _offline()
-    
+
     def checkMaster(self):
         if self._checkingMaster:
             return
         self._checkingMaster = True
         self._checkCount = 0
-        
+
         for host, pool in self.pools.items():
             d = defer.Deferred()
             pool.checkMaster(d)
@@ -209,7 +251,10 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
     
     def __str__(self):
         return '<_MongoConnectionPool %s:%s (%s connections) - %s>' % (self.host, self.port, self.size, 'master' if self.isMaster else 'secondary')
-    
+
+    def __repr__(self):
+        return self.__str__()
+ 
     @defer.inlineCallbacks
     def append(self, conn):
         if not self._checkedMaster:
@@ -231,23 +276,37 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
         
         if self.disconnecting:
             conn.transport.loseConnection()
+
+    def clientConnectionLost(self, connector, reason):
+        log.err(repr(connector) + ":" + repr(reason))
     
     @defer.inlineCallbacks
     def checkMaster(self, deferred):
         try:
             c = self.connection()
             if isinstance(c, _offline):  # don't bother trying to check for master if not connected
+                self.isMaster = False
+                deferred.callback(False)
                 return
-            cursor = yield c.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
-            results = yield cursor.as_list()
+
+            @timeout(1)
+            def query():
+                return c.OP_QUERY("admin.$cmd", SON([ ('isMaster', 1) ]), 0, -1)
+            @timeout(1)
+            def as_list(cursor):
+                return cursor.as_list()
+            cursor = yield query()
+            results = yield as_list(cursor)
             info = results and results[0] or {}
             self.isMaster = info.get('ismaster', False)
             if 'hosts' in info:
                 self.manager.updateHosts(info['hosts'])
-                
             deferred.callback(self.isMaster)
-        except:
-            reactor.callLater(1, self.checkMaster, deferred)   
+        except Exception, e:
+            self.isMaster = False
+            deferred.errback(e)
+            yield self.disconnectPool()
+            self.manager.addHost("%s:%s" % (self.host, self.port))
     
     def remove(self, conn):
         try:
@@ -281,7 +340,6 @@ class _MongoConnectionPool(protocol.ReconnectingClientFactory):
             self.idx += 1
             self.idx = self.idx % self.size
         except:
-            log.err()
             return _offline()
         else:
             return conn

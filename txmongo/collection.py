@@ -122,7 +122,7 @@ class Collection(object):
             defer.returnValue(None)
         
         if isinstance(docs[0], dict) and docs[0].get("err") is not None:
-            raise errors.OperationFailuer(docs[0])
+            raise errors.OperationFailure(docs[0])
         defer.returnValue(docs[0])
     
     def runCommand(self, command, value=1, **kwargs):

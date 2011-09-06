@@ -17,6 +17,7 @@ import struct
 from txmongo._pymongo import bson
 from twisted.internet import defer, protocol
 
+
 _ONE = "\x01\x00\x00\x00"
 _ZERO = "\x00\x00\x00\x00"
 
@@ -184,7 +185,7 @@ class MongoProtocol(protocol.Protocol):
         header = struct.pack("<iiii", 16 + len(message), self.__id, 0, operation)
         self.transport.write(header + message)
         self.__id += 1
-    
+   
     def OP_INSERT(self, collection, docs):
         docs = [bson.BSON.from_dict(doc) for doc in docs]
         self.sendMessage(2002, collection, "".join(docs))
